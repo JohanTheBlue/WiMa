@@ -1,0 +1,7 @@
+# make sure your capture iface is up (replace if needed)
+ip link | grep -E 'wlan[0-9]'
+# optional bring-up
+sudo ip link set wlan1 up || true
+
+# run kismet headless; logs go to /home/droid/wardrive/logs/kismet/
+kismet --no-ncurses

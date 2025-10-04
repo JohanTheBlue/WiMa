@@ -1,0 +1,11 @@
+cd ~/wardrive
+./scripts/wardrive.sh start
+
+# ... collect ...
+
+./scripts/wardrive.sh stop
+
+./scripts/build_map.sh
+
+cd logs
+./

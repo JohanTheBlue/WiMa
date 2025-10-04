@@ -1,0 +1,2 @@
+lsusb
+dmesg | grep tty

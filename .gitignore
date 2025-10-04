@@ -1,0 +1,14 @@
+# build artifacts & logs
+logs/
+*.kismet
+*.pcap
+*.csv
+
+# geojson outputs (keep snapshots & stats)
+*.geojson
+!data/snapshots/
+!data/stats/
+
+# python caches
+__pycache__/
+*.pyc

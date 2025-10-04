@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""
+make_map.py
+Usage:
+    python make_map.py path/to/networks.geojson [out.html]
+
+Produces a Folium map with:
+ - clustered markers
+ - marker color by device type/encryption and signal strength
+ - small heatmap from signal strengths (when available)
+ - on-map legend
+"""
+
+import sys, json, math
+from pathlib import Path
+import folium
+from folium.plugins import MarkerCluster, HeatMap
+from branca.element import MacroElement
+from jinja2 import Template
+
+# ---------- helpers ----------
+def try_get_signal(props):
+    """Return signal in dBm as float, or None."""
+    candidates = [
+        "Signal", "signal", "signal_dbm", "Signal_dBm",
+        "kismet.device.base.signal.last", "signal.last"
+    ]
+    def to_float(val):
+        if val is None:
+            return None
+        # normalize to string, strip "dbm", spaces, and Unicode minus
+        s = str(val).strip()
+        if s.lower() in {"none","null","nan",""}:
+            return None
+        s = s.replace("DBM","dbm").replace("Dbm","dbm")
+        s = s.replace("−","-")          # Unicode minus → ASCII
+        s = s.replace("dBm","").replace("dbm","").strip()
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    # 1) direct known keys
+    for k in candidates:
+        v = props.get(k)
+        x = to_float(v)
+        if x is not None:
+            return x
+    # 2) any key containing 'signal'
+    for k, v in props.items():
+        if "signal" in k.lower():
+            x = to_float(v)
+            if x is not None:
+                return x
+    return None
+
+
+def signal_color(sig):
+    """
+    Map signal strength (dBm, negative) to a color.
+    Strong  (-30.. -60) => green
+    Medium (-60.. -80) => orange
+    Weak   (-80.. -120)=> red
+    None => gray
+    """
+    if sig is None:
+        return "#808080"  # gray
+    try:
+        s = float(sig)
+    except Exception:
+        return "#808080"
+    if s >= -60:
+        return "#2ca02c"  # green
+    if s >= -80:
+        return "#ff7f0e"  # orange
+    return "#d62728"      # red
+
+def type_color(props):
+    """
+    Pick base color by device type/encryption. The returned color can be
+    combined or overridden by signal_color for intensity.
+    """
+    # Look for obvious signs of AP vs client vs bridged vs weak enc
+    enc = (props.get("Encryption") or props.get("Enc") or props.get("Type") or "").lower()
+    ssid = (props.get("SSID") or "").lower()
+    bssid = (props.get("BSSID") or "").lower()
+
+    # weak encryption detection
+    if "wep" in enc or ("wpa" in enc and "tkip" in enc and "wpa2" not in enc and "wpa3" not in enc):
+        return "#ff7f0e"  # orange (warning)
+    if "open" in enc or "none" in enc or enc.strip() == "":
+        return "#7f7f7f"  # darker gray for open
+    # clients / bridged devices
+    if "client" in enc or "client" in (props.get("Type") or "").lower() or "bridged" in enc:
+        return "#1f77b4"  # blue-ish
+    # APs (default to green-ish)
+    return "#2ca02c"
+
+# Small HTML legend (will be inserted)
+LEGEND_HTML = """
+{% macro html(this, kwargs) %}
+<div style="
+    position: fixed;
+    bottom: 45px;
+    left: 10px;
+    width: 195px;
+    z-index:9999;
+    font-size:14px;
+    ">
+  <div style="background-color: white; border-radius:6px; padding:10px; box-shadow: 0 0 6px rgba(0,0,0,0.3);">
+    <b>Legend</b><br/>
+    <i style="background: #2ca02c; width:12px; height:12px; display:inline-block; margin-right:6px;"></i> AP / Encrypted<br/>
+    <i style="background: #1f77b4; width:12px; height:12px; display:inline-block; margin-right:6px;"></i> Client / Bridged<br/>
+    <i style="background: #ff7f0e; width:12px; height:12px; display:inline-block; margin-right:6px;"></i> Weak/Legacy Encryption<br/>
+    <i style="background: #808080; width:12px; height:12px; display:inline-block; margin-right:6px;"></i> Unknown / No signal<br/>
+    <hr style="margin:6px 0;">
+    <small>Marker color also indicates <b>signal strength</b> (green strong → red weak).</small>
+  </div>
+</div>
+{% endmacro %}
+"""
+class Legend(MacroElement):
+    def __init__(self):
+        super().__init__()
+        self._template = Template(LEGEND_HTML)
+
+# ---------- main ----------
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python make_map.py /path/to/networks.geojson [out.html]")
+        sys.exit(1)
+
+    in_path = Path(sys.argv[1])
+    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else in_path.with_name("networks_colored.html")
+
+    geo = json.loads(in_path.read_text(encoding="utf-8"))
+    features = geo.get("features", [])
+
+    # Compute center
+    lats = []
+    lons = []
+    for ft in features:
+        try:
+            lon, lat = ft["geometry"]["coordinates"]
+            lats.append(float(lat)); lons.append(float(lon))
+        except Exception:
+            pass
+    if lats:
+        center = [sum(lats)/len(lats), sum(lons)/len(lons)]
+        zoom = 14
+    else:
+        center = [47.4979, 19.0402]  # fallback Budapest
+        zoom = 13
+
+    m = folium.Map(location=center, zoom_start=zoom, control_scale=True)
+    marker_cluster = MarkerCluster(name="Networks (clustered)").add_to(m)
+
+    heat_points = []
+    for ft in features:
+        props = ft.get("properties", {}) or {}
+        coords = ft.get("geometry", {}).get("coordinates", [None, None])
+        if coords[0] is None:
+            continue
+        lon, lat = coords
+        ssid = props.get("SSID") or props.get("ssid") or "hidden"
+        bssid = props.get("BSSID") or props.get("bssid") or ""
+        enc = props.get("Encryption") or props.get("Enc") or props.get("Type") or ""
+        ch = props.get("Channel") or props.get("channel") or ""
+        sig = try_get_signal(props)  # value in dBm or None
+
+        # base color choice using type/encryption
+        base_col = type_color(props)
+        # signal overlay color (intensity)
+        sig_col = signal_color(sig)
+
+        # if signal exists, use signal_color; else use base_color
+        final_color = sig_col if sig is not None else base_col
+
+        popup_html = f"""
+        <b>SSID:</b> {ssid}<br>
+        <b>BSSID:</b> {bssid}<br>
+        <b>Enc/Type:</b> {enc or 'unknown'}<br>
+        <b>Channel:</b> {ch or 'N/A'}<br>
+        <b>Signal dBm:</b> {sig if sig is not None else 'N/A'}
+        """
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=5,
+            color=final_color,
+            fill=True,
+            fill_color=final_color,
+            fill_opacity=0.85 if sig is not None else 0.6,
+            popup=folium.Popup(popup_html, max_width=300)
+        ).add_to(marker_cluster)
+
+        # heatmap weight: normalize signal to 0..1 if available
+        if sig is not None:
+            # convert -100..-30 -> 0..1
+            w = max(0.0, min(1.0, (sig + 100) / 70.0))
+            heat_points.append([lat, lon, w])
+        else:
+            # small default weight to still show density
+            heat_points.append([lat, lon, 0.2])
+
+    # Heatmap layer (optional by default)
+    if heat_points:
+        HeatMap(heat_points, name="Signal heatmap", radius=12, blur=10, max_zoom=16).add_to(m)
+
+    # Layer control + legend
+    folium.LayerControl(collapsed=False).add_to(m)
+    m.get_root().add_child(Legend())
+
+    # Save
+    m.save(out_path)
+    print(f"Saved map: {out_path}")
+
+if __name__ == "__main__":
+    main()
