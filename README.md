@@ -145,8 +145,6 @@ make ci
 * Permissions: starting Kismet and bringing interfaces up requires sufficient privileges. The script uses `sudo` for the necessary operations.
 * Logs and outputs: raw `.kismet` DBs and PCAPs are kept under `logs/` (and your `.gitignore` should exclude them). `make map` reads those logs and writes sanitized snapshots into `data/snapshots/` and an HTML map into `logs/kismet/wardrive/` which is copied to `data/snapshots/` for convenience.
 
-````
-
 ---
 
 ## 📊 Outputs
