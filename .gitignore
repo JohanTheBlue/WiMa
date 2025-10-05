@@ -12,3 +12,7 @@ logs/
 # python caches
 __pycache__/
 *.pyc
+
+# tools output & local secrets
+tools/*.out
+.env
