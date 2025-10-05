@@ -71,26 +71,6 @@ mkdir -p ~/.kismet
 ln -sf $PWD/configs/kismet_logging.conf ~/.kismet/kismet_logging.conf
 ```
 
----
-
-Nice catch — thanks for pasting `scripts/wardrive.sh`. That makes the README Quickstart a bit too generic — your repo already has a convenient wrapper to start/stop Kismet. I'll give you an updated **Quickstart** section (copy-paste ready) that replaces the simple `kismet` line with the `scripts/wardrive.sh` usage and explains the flow (start → roam → stop → build).
-
----
-
-### What changed / why
-
-Your `scripts/wardrive.sh`:
-
-* handles directory checks and permissions,
-* ensures `gpsd` is running,
-* brings up the interface,
-* starts Kismet headless with logs placed under `logs/kismet/wardrive`,
-* writes a PID file so you can stop it cleanly.
-
-So the README should direct users to use that script instead of invoking `kismet` manually.
-
----
-
 ## 🧭 Quickstart (recommended)
 
 WiMa includes a helper script to manage headless Kismet runs: `scripts/wardrive.sh`.
