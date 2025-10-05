@@ -18,3 +18,7 @@ tools/*.out
 .env
 data/snapshots/
 data/stats/
+data/snapshots/*
+!data/snapshots/.gitkeep
+data/stats/*
+!data/stats/.gitkeep
