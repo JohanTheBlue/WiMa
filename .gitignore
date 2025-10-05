@@ -16,3 +16,5 @@ __pycache__/
 # tools output & local secrets
 tools/*.out
 .env
+data/snapshots/
+data/stats/
